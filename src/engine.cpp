@@ -70,12 +70,12 @@ Engine::Engine(std::string path) :
         return numa_config_information_as_string() + "\n" + thread_binding_information_as_string();
     });
 
-    options["Threads"] << Option(1, 1, 1024, [this](const Option&) {
+    options["Threads"] << Option(8, 1, 1024, [this](const Option&) {
         resize_threads();
         return thread_binding_information_as_string();
     });
 
-    options["Hash"] << Option(16, 1, MaxHashMB, [this](const Option& o) {
+    options["Hash"] << Option(128, 1, MaxHashMB, [this](const Option& o) {
         set_tt_size(o);
         return std::nullopt;
     });

@@ -113,11 +113,17 @@ void UCIEngine::loop() {
 
         else if (token == "setoption")
             setoption(is);
+        else if (token == "sel")
+        {
+            sel(is);
+        }
         else if (token == "go")
         {
+            /*
             // send info strings after the go command is sent for old GUIs and python-chess
             print_info_string(engine.numa_config_information_as_string());
             print_info_string(engine.thread_binding_information_as_string());
+            */
             go(is);
         }
         else if (token == "position")
@@ -204,6 +210,20 @@ Search::LimitsType UCIEngine::parse_limits(std::istream& is) {
             limits.ponderMode = true;
 
     return limits;
+}
+
+void UCIEngine::sel(std::istringstream& is) {
+
+    Search::LimitsType limits;
+    std::string        token;
+
+    limits.startTime = now();  // The search starts as early as possible
+
+    is >> limits.depth;
+    is >> limits.minmoves;
+    is >> limits.maxmargin;
+
+    engine.go(limits);
 }
 
 void UCIEngine::go(std::istringstream& is) {
@@ -363,8 +383,8 @@ std::string UCIEngine::format_score(const Score& s) {
     constexpr int TB_CP = 20000;
     const auto    format =
       overload{[](Score::Mate mate) -> std::string {
-                   auto m = (mate.plies > 0 ? (mate.plies + 1) : mate.plies) / 2;
-                   return std::string("mate ") + std::to_string(m);
+                   auto m = (mate.plies > 0 ? (mate.plies + 1) : (mate.plies - 1));
+                   return std::string("mateply ") + std::to_string(m);
                },
                [](Score::Tablebase tb) -> std::string {
                    return std::string("cp ")
@@ -463,12 +483,13 @@ void UCIEngine::on_update_full(const Engine::InfoFull& info, bool showWDL) {
         ss << " " << info.bound;
 
     ss << " nodes " << info.nodes        //
-       << " nps " << info.nps            //
+       << " nps " << info.nps;           //
+/*
        << " hashfull " << info.hashfull  //
        << " tbhits " << info.tbHits      //
        << " time " << info.timeMs        //
        << " pv " << info.pv;             //
-
+*/
     sync_cout << ss.str() << sync_endl;
 }
 
