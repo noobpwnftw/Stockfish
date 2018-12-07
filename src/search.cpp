@@ -239,18 +239,36 @@ void Search::Worker::start_searching() {
     main_manager()->bestPreviousScore        = bestThread->rootMoves[0].score;
     main_manager()->bestPreviousAverageScore = bestThread->rootMoves[0].averageScore;
 
-    // Send again PV info if we have a new best thread
-    if (bestThread != this)
-        main_manager()->pv(*bestThread, threads, tt, bestThread->completedDepth);
+    if (limits.minmoves != 0)
+    {
+        sync_cout << "selmove";
+        for (size_t i = 0; i < bestThread->rootMoves.size(); i++)
+        {
+          if (bestThread->rootMoves[i].score >= bestThread->rootMoves[0].score - limits.maxmargin || i < (size_t)limits.minmoves)
+              std::cout << " " << UCIEngine::move(bestThread->rootMoves[i].pv[0], rootPos.is_chess960());
+        }
+        std::cout << sync_endl;
+    }
+    else
+    {
+        // Send again PV info if we have a new best thread
+        if (bestThread != this)
+            main_manager()->pv(*bestThread, threads, tt, bestThread->completedDepth);
 
-    std::string ponder;
+        std::string ponder;
 
-    if (bestThread->rootMoves[0].pv.size() > 1
-        || bestThread->rootMoves[0].extract_ponder_from_tt(tt, rootPos))
-        ponder = UCIEngine::move(bestThread->rootMoves[0].pv[1], rootPos.is_chess960());
+        if (bestThread->rootMoves[0].pv.size() > 1
+            || bestThread->rootMoves[0].extract_ponder_from_tt(tt, rootPos))
+        {
+            StateInfo tmpSI;
+            rootPos.do_move(bestThread->rootMoves[0].pv[0], tmpSI);
+            ponder = UCIEngine::move(bestThread->rootMoves[0].pv[1], rootPos.is_chess960());
+            rootPos.undo_move(bestThread->rootMoves[0].pv[0]);
+        }
 
-    auto bestmove = UCIEngine::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
-    main_manager()->updates.onBestmove(bestmove, ponder);
+        auto bestmove = UCIEngine::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
+        main_manager()->updates.onBestmove(bestmove, ponder);
+    }
 }
 
 // Main iterative deepening loop. It calls search()
@@ -307,7 +325,10 @@ void Search::Worker::iterative_deepening() {
     if (skill.enabled())
         multiPV = std::max(multiPV, size_t(4));
 
-    multiPV = std::min(multiPV, rootMoves.size());
+    if(limits.minmoves == 0)
+        multiPV = std::min(multiPV, rootMoves.size());
+    else
+        multiPV = rootMoves.size();
 
     int searchAgainCounter = 0;
 
@@ -391,7 +412,7 @@ void Search::Worker::iterative_deepening() {
                 // When failing high/low give some update before a re-search. To avoid
                 // excessive output that could hang GUIs like Fritz 19, only start
                 // at nodes > 10M (rather than depth N, which can be reached quickly)
-                if (mainThread && multiPV == 1 && (bestValue <= alpha || bestValue >= beta)
+                if (mainThread && limits.minmoves == 0 && multiPV == 1 && (bestValue <= alpha || bestValue >= beta)
                     && nodes > 10000000)
                     main_manager()->pv(*this, threads, tt, rootDepth);
 
@@ -423,7 +444,7 @@ void Search::Worker::iterative_deepening() {
             // Sort the PV lines searched so far and update the GUI
             std::stable_sort(rootMoves.begin() + pvFirst, rootMoves.begin() + pvIdx + 1);
 
-            if (mainThread
+            if (mainThread && limits.minmoves == 0
                 && (threads.stop || pvIdx + 1 == multiPV || nodes > 10000000)
                 // A thread that aborted search can have mated-in/TB-loss PV and
                 // score that cannot be trusted, i.e. it can be delayed or refuted
@@ -2146,8 +2167,15 @@ void SearchManager::pv(Search::Worker&           worker,
             syzygy_extend_pv(worker.options, worker.limits, pos, rootMoves[i], v);
 
         std::string pv;
-        for (Move m : rootMoves[i].pv)
+        std::list<StateInfo> sts;
+        for (Move m : rootMoves[i].pv) {
+            ASSERT_ALIGNED(&st, Eval::NNUE::CacheLineSize);
             pv += UCIEngine::move(m, pos.is_chess960()) + " ";
+            auto& st = sts.emplace_back();
+            pos.do_move(m, st);
+        }
+        for (auto it = rootMoves[i].pv.rbegin(); it != rootMoves[i].pv.rend(); ++it)
+            pos.undo_move(*it);
 
         // Remove last whitespace
         if (!pv.empty())

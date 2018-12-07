@@ -83,7 +83,7 @@ class Position {
     Position& operator=(const Position&) = delete;
 
     // FEN string input/output
-    Position&   set(const std::string& fenStr, bool isChess960, StateInfo* si);
+    Position&   set(const std::string& fenStr, StateInfo* si);
     Position&   set(const std::string& code, Color c, StateInfo* si);
     std::string fen() const;
 
@@ -215,7 +215,6 @@ class Position {
     StateInfo*   st;
     int          gamePly;
     Color        sideToMove;
-    bool         chess960;
     DirtyPiece   scratch_dp;
     DirtyThreats scratch_dts;
 };
@@ -329,7 +328,18 @@ inline int Position::game_ply() const { return gamePly; }
 
 inline int Position::rule50_count() const { return st->rule50; }
 
-inline bool Position::is_chess960() const { return chess960; }
+inline bool Position::is_chess960() const {
+    if (!can_castle(ANY_CASTLING))
+        return false;
+
+    return
+        (can_castle(WHITE_OO)  && file_of(castling_rook_square(WHITE_OO))  != FILE_H) ||
+        (can_castle(WHITE_OOO) && file_of(castling_rook_square(WHITE_OOO)) != FILE_A) ||
+        (can_castle(BLACK_OO)  && file_of(castling_rook_square(BLACK_OO))  != FILE_H) ||
+        (can_castle(BLACK_OOO) && file_of(castling_rook_square(BLACK_OOO)) != FILE_A) ||
+        (can_castle(WHITE_CASTLING) && square<KING>(WHITE) != SQ_E1) ||
+        (can_castle(BLACK_CASTLING) && square<KING>(BLACK) != SQ_E8);
+}
 
 inline bool Position::capture(Move m) const {
     assert(m.is_ok());
