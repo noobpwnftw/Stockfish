@@ -230,17 +230,29 @@ void MainThread::search() {
       bestThread = Threads.get_best_thread();
 
   bestPreviousScore = bestThread->rootMoves[0].score;
+  if (Limits.minmoves != 0)
+  {
+      sync_cout << "selmove";
+      for (size_t i = 0; i < bestThread->rootMoves.size(); i++)
+      {
+          if (bestThread->rootMoves[i].score >= bestPreviousScore - Limits.maxmargin || i < (size_t)Limits.minmoves)
+              std::cout << " " << UCI::move(bestThread->rootMoves[i].pv[0], rootPos.is_chess960());
+      }
+      std::cout << sync_endl;
+  }
+  else
+  {
+      // Send again PV info if we have a new best thread
+      if (bestThread != this)
+          sync_cout << UCI::pv(bestThread->rootPos, bestThread->completedDepth, -VALUE_INFINITE, VALUE_INFINITE) << sync_endl;
 
-  // Send again PV info if we have a new best thread
-  if (bestThread != this)
-      sync_cout << UCI::pv(bestThread->rootPos, bestThread->completedDepth, -VALUE_INFINITE, VALUE_INFINITE) << sync_endl;
+      sync_cout << "bestmove " << UCI::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
 
-  sync_cout << "bestmove " << UCI::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
+      if (bestThread->rootMoves[0].pv.size() > 1 || bestThread->rootMoves[0].extract_ponder_from_tt(rootPos))
+          std::cout << " ponder " << UCI::move(bestThread->rootMoves[0].pv[1], rootPos.is_chess960());
 
-  if (bestThread->rootMoves[0].pv.size() > 1 || bestThread->rootMoves[0].extract_ponder_from_tt(rootPos))
-      std::cout << " ponder " << UCI::move(bestThread->rootMoves[0].pv[1], rootPos.is_chess960());
-
-  std::cout << sync_endl;
+      std::cout << sync_endl;
+  }
 }
 
 
@@ -309,7 +321,10 @@ void Thread::search() {
   if (skill.enabled())
       multiPV = std::max(multiPV, (size_t)4);
 
-  multiPV = std::min(multiPV, rootMoves.size());
+  if(Limits.minmoves == 0)
+      multiPV = std::min(multiPV, rootMoves.size());
+  else
+      multiPV = rootMoves.size();
   ttHitAverage = TtHitAverageWindow * TtHitAverageResolution / 2;
 
   trend = SCORE_ZERO;
@@ -390,7 +405,7 @@ void Thread::search() {
 
               // When failing high/low give some update (without cluttering
               // the UI) before a re-search.
-              if (   mainThread
+              if (   mainThread && Limits.minmoves == 0
                   && multiPV == 1
                   && (bestValue <= alpha || bestValue >= beta)
                   && Time.elapsed() > 3000)
@@ -423,7 +438,7 @@ void Thread::search() {
           // Sort the PV lines searched so far and update the GUI
           std::stable_sort(rootMoves.begin() + pvFirst, rootMoves.begin() + pvIdx + 1);
 
-          if (    mainThread
+          if (    mainThread && Limits.minmoves == 0
               && (Threads.stop || pvIdx + 1 == multiPV || Time.elapsed() > 3000))
               sync_cout << UCI::pv(rootPos, rootDepth, alpha, beta) << sync_endl;
       }
@@ -973,11 +988,12 @@ moves_loop: // When in check, search starts from here
           continue;
 
       ss->moveCount = ++moveCount;
-
+      /*
       if (rootNode && thisThread == Threads.main() && Time.elapsed() > 3000)
           sync_cout << "info depth " << depth
                     << " currmove " << UCI::move(move, pos.is_chess960())
                     << " currmovenumber " << moveCount + thisThread->pvIdx << sync_endl;
+      */
       if (PvNode)
           (ss+1)->pv = nullptr;
 
@@ -1809,7 +1825,6 @@ string UCI::pv(const Position& pos, Depth depth, Value alpha, Value beta) {
   size_t pvIdx = pos.this_thread()->pvIdx;
   size_t multiPV = std::min((size_t)Options["MultiPV"], rootMoves.size());
   uint64_t nodesSearched = Threads.nodes_searched();
-  uint64_t tbHits = Threads.tb_hits() + (TB::RootInTB ? rootMoves.size() : 0);
 
   for (size_t i = 0; i < multiPV; ++i)
   {
@@ -1844,7 +1859,7 @@ string UCI::pv(const Position& pos, Depth depth, Value alpha, Value beta) {
 
       ss << " nodes "    << nodesSearched
          << " nps "      << nodesSearched * 1000 / elapsed;
-
+      /*
       if (elapsed > 1000) // Earlier makes little sense
           ss << " hashfull " << TT.hashfull();
 
@@ -1854,6 +1869,7 @@ string UCI::pv(const Position& pos, Depth depth, Value alpha, Value beta) {
 
       for (Move m : rootMoves[i].pv)
           ss << " " << UCI::move(m, pos.is_chess960());
+      */
   }
 
   return ss.str();

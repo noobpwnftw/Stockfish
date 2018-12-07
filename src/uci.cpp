@@ -150,6 +150,20 @@ namespace {
     Threads.start_thinking(pos, states, limits, ponderMode);
   }
 
+  void sel(Position& pos, istringstream& is, StateListPtr& states) {
+
+      Search::LimitsType limits;
+      string token;
+      bool ponderMode = false;
+
+      limits.startTime = now(); // As early as possible!
+
+      is >> limits.depth;
+      is >> limits.minmoves;
+      is >> limits.maxmargin;
+      Threads.start_thinking(pos, states, limits, ponderMode);
+  }
+
 
   // bench() is called when engine receives the "bench" command. Firstly
   // a list of UCI commands is setup according to bench parameters, then
@@ -267,6 +281,7 @@ void UCI::loop(int argc, char* argv[]) {
       else if (token == "setoption")  setoption(is);
       else if (token == "go")         go(pos, is, states);
       else if (token == "position")   position(pos, is, states);
+      else if (token == "sel")        sel(pos, is, states);
       else if (token == "ucinewgame") Search::clear();
       else if (token == "isready")    sync_cout << "readyok" << sync_endl;
 
