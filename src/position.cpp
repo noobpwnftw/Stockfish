@@ -91,7 +91,7 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
         StateInfo st;
 
         Position p;
-        p.set(pos.fen(), pos.is_chess960(), &st);
+        p.set(pos.fen(), &st);
         Tablebases::ProbeState s1, s2;
         Tablebases::WDLScore   wdl = Tablebases::probe_wdl(p, &s1);
         int                    dtz = Tablebases::probe_dtz(p, &s2);
@@ -166,8 +166,7 @@ void Position::init() {
 // Initializes the position object with the given FEN string.
 // The FEN string is strictly validated; if it is invalid or inconsistent,
 // a PositionSetError describing the problem is returned, otherwise std::nullopt.
-std::optional<PositionSetError>
-Position::set(const string& fenStr, bool isChess960, StateInfo* si) {
+std::optional<PositionSetError> Position::set(const string& fenStr, StateInfo* si) {
     /*
    A FEN string defines a particular position using only the ASCII character set.
 
@@ -432,7 +431,6 @@ Position::set(const string& fenStr, bool isChess960, StateInfo* si) {
     // handle also common incorrect FEN with fullmove = 0.
     gamePly = std::max(2 * (gamePly - 1), 0) + (sideToMove == BLACK);
 
-    chess960 = isChess960;
     set_state();
 
     if (attackers_to_exist(square<KING>(~sideToMove), pieces(), sideToMove))
@@ -554,7 +552,7 @@ std::optional<PositionSetError> Position::set(const string& code, Color c, State
     string fenStr = "8/" + sides[0] + char(8 - sides[0].length() + '0') + "/8/8/8/8/" + sides[1]
                   + char(8 - sides[1].length() + '0') + "/8 w - - 0 10";
 
-    return set(fenStr, false, si);
+    return set(fenStr, si);
 }
 
 
@@ -586,18 +584,31 @@ string Position::fen() const {
 
     ss << (sideToMove == WHITE ? " w " : " b ");
 
-    if (can_castle(WHITE_OO))
-        ss << (chess960 ? char('A' + file_of(castling_rook_square(WHITE_OO))) : 'K');
+    if (!is_chess960()) {
+        if (can_castle(WHITE_OO))
+            ss << 'K';
 
-    if (can_castle(WHITE_OOO))
-        ss << (chess960 ? char('A' + file_of(castling_rook_square(WHITE_OOO))) : 'Q');
+        if (can_castle(WHITE_OOO))
+            ss << 'Q';
 
-    if (can_castle(BLACK_OO))
-        ss << (chess960 ? char('a' + file_of(castling_rook_square(BLACK_OO))) : 'k');
+        if (can_castle(BLACK_OO))
+            ss << 'k';
 
-    if (can_castle(BLACK_OOO))
-        ss << (chess960 ? char('a' + file_of(castling_rook_square(BLACK_OOO))) : 'q');
+        if (can_castle(BLACK_OOO))
+            ss << 'q';
+    } else {
+        if (can_castle(WHITE_OO))
+            ss << char('A' + file_of(castling_rook_square(WHITE_OO)));
 
+        if (can_castle(WHITE_OOO))
+            ss << char('A' + file_of(castling_rook_square(WHITE_OOO)));
+
+        if (can_castle(BLACK_OO))
+            ss << char('a' + file_of(castling_rook_square(BLACK_OO)));
+
+        if (can_castle(BLACK_OOO))
+            ss << char('a' + file_of(castling_rook_square(BLACK_OOO)));
+    }
     if (!can_castle(ANY_CASTLING))
         ss << '-';
 
@@ -685,7 +696,7 @@ bool Position::legal(Move m) const {
 
         // In case of Chess960, verify if the Rook blocks some checks.
         // For instance an enemy queen in SQ_A1 when castling rook is in SQ_B1.
-        return !chess960 || !(blockers_for_king(us) & m.to_sq());
+        return !(blockers_for_king(us) & m.to_sq());
     }
 
     // If the moving piece is a king, check whether the destination square is
@@ -1599,7 +1610,7 @@ std::optional<PositionSetError> Position::flip() {
     std::getline(ss, token);  // Half and full moves
     f += token;
 
-    return set(f, is_chess960(), st);
+    return set(f, st);
 }
 
 

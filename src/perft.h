@@ -56,12 +56,11 @@ u64 perft(Position& pos, Depth depth) {
     return nodes;
 }
 
-inline std::variant<u64, PositionSetError>
-perft(const std::string& fen, Depth depth, bool isChess960) {
+inline std::variant<u64, PositionSetError> perft(const std::string& fen, Depth depth) {
     StateInfo st;
     Position  p;
 
-    if (auto err = p.set(fen, isChess960, &st))
+    if (auto err = p.set(fen, &st))
         return {*err};
 
     return perft<true>(p, depth);
