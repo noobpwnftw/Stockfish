@@ -247,21 +247,41 @@ void Search::Worker::start_searching() {
     main_manager()->bestPreviousScore        = bestThread->rootMoves[0].score;
     main_manager()->bestPreviousAverageScore = bestThread->rootMoves[0].averageScore;
 
-    if (bestThread->rootMoves[0].pv.size() == 1
-        && bestThread->rootMoves[0].extract_ponder_from_tt(tt, rootPos))
-        uciPvSent = false;
+    if (limits.minmoves != 0)
+    {
+        sync_cout << "selmove";
+        for (size_t i = 0; i < bestThread->rootMoves.size(); i++)
+        {
+            if (bestThread->rootMoves[i].score >= bestThread->rootMoves[0].score - limits.maxmargin
+                || i < size_t(limits.minmoves))
+                std::cout << " "
+                          << UCIEngine::move(bestThread->rootMoves[i].pv[0], rootPos.is_chess960());
+        }
+        std::cout << sync_endl;
+    }
+    else
+    {
+        if (bestThread->rootMoves[0].pv.size() == 1
+            && bestThread->rootMoves[0].extract_ponder_from_tt(tt, rootPos))
+            uciPvSent = false;
 
-    // Send PV info if it has changed since last output in iterative_deepening()
-    if (!uciPvSent || bestThread != this)
-        main_manager()->output_pv(*bestThread, threads, tt, bestThread->rootDepth);
+        // Send PV info if it has changed since last output in iterative_deepening()
+        if (!uciPvSent || bestThread != this)
+            main_manager()->output_pv(*bestThread, threads, tt, bestThread->rootDepth);
 
-    // In rare cases, output_pv() may change the ponder move through syzygy_extend_pv()
-    std::string ponder;
-    if (bestThread->rootMoves[0].pv.size() > 1)
-        ponder = UCIEngine::move(bestThread->rootMoves[0].pv[1], rootPos.is_chess960());
+        // In rare cases, output_pv() may change the ponder move through syzygy_extend_pv()
+        std::string ponder;
+        if (bestThread->rootMoves[0].pv.size() > 1)
+        {
+            StateInfo tmpSI;
+            rootPos.do_move(bestThread->rootMoves[0].pv[0], tmpSI);
+            ponder = UCIEngine::move(bestThread->rootMoves[0].pv[1], rootPos.is_chess960());
+            rootPos.undo_move(bestThread->rootMoves[0].pv[0]);
+        }
 
-    auto bestmove = UCIEngine::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
-    main_manager()->updates.onBestmove(bestmove, ponder);
+        auto bestmove = UCIEngine::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
+        main_manager()->updates.onBestmove(bestmove, ponder);
+    }
 }
 
 // Main iterative deepening loop. It calls search() repeatedly with increasing
@@ -318,7 +338,10 @@ bool Search::Worker::iterative_deepening() {
     if (skill.enabled())
         multiPV = std::max(multiPV, usize(4));
 
-    multiPV = std::min(multiPV, rootMoves.size());
+    if(limits.minmoves == 0)
+        multiPV = std::min(multiPV, rootMoves.size());
+    else
+        multiPV = rootMoves.size();
 
     int  searchAgainCounter = 0;
     bool uciPvSent          = false;
@@ -411,8 +434,8 @@ bool Search::Worker::iterative_deepening() {
                 // When failing high/low give some update before a re-search. To avoid
                 // excessive output that could hang GUIs like Fritz 19, only start
                 // at nodes > 10M (rather than depth N, which can be reached quickly).
-                if (mainThread && multiPV == 1 && (bestValue <= alpha || bestValue >= beta)
-                    && nodes > NODES_LIMIT_OUTPUT)
+                if (mainThread && limits.minmoves == 0 && multiPV == 1
+                    && (bestValue <= alpha || bestValue >= beta) && nodes > NODES_LIMIT_OUTPUT)
                     main_manager()->output_pv(*this, threads, tt, rootDepth);
 
                 // In case of failing low/high increase aspiration window and re-search,
@@ -492,7 +515,8 @@ bool Search::Worker::iterative_deepening() {
             // Sort the PV lines searched so far and update the GUI
             std::stable_sort(rootMoves.begin() + pvFirst, rootMoves.begin() + pvIdx + 1);
 
-            if (mainThread && !threads.stop && (pvIdx + 1 == multiPV || nodes > NODES_LIMIT_OUTPUT))
+            if (mainThread && limits.minmoves == 0 && !threads.stop
+                && (pvIdx + 1 == multiPV || nodes > NODES_LIMIT_OUTPUT))
             {
                 main_manager()->output_pv(*this, threads, tt, rootDepth);
                 uciPvSent = (pvIdx + 1 == multiPV);
@@ -2304,8 +2328,16 @@ void SearchManager::output_pv(Search::Worker&           worker,
             syzygy_extend_pv(worker.options, worker.limits, pos, rootMoves[i], v, multiPV);
 
         std::string pv;
-        for (Move m : usePreviousScore ? rootMoves[i].previousPV : rootMoves[i].pv)
+        const auto&          pvMoves = usePreviousScore ? rootMoves[i].previousPV : rootMoves[i].pv;
+        std::list<StateInfo> sts;
+        for (Move m : pvMoves)
+        {
             pv += UCIEngine::move(m, pos.is_chess960()) + " ";
+            auto& st = sts.emplace_back();
+            pos.do_move(m, st);
+        }
+        for (auto it = pvMoves.rbegin(); it != pvMoves.rend(); ++it)
+            pos.undo_move(*it);
 
         // Remove last whitespace
         if (!pv.empty())

@@ -64,7 +64,7 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
     networkFile{std::nullopt, ""},
     network(numaContext, get_default_network()) {
 
-    pos.set(StartFEN, false, &states->back());
+    pos.set(StartFEN, &states->back());
 
     options.add(  //
       "Debug Log File", Option("", [](const Option& o) {
@@ -110,8 +110,6 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
 
     options.add("nodestime", Option(0, 0, 10000));
 
-    options.add("UCI_Chess960", Option(false));
-
     options.add("UCI_LimitStrength", Option(false));
 
     options.add("UCI_Elo",
@@ -143,11 +141,10 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
     resize_threads();
 }
 
-std::variant<u64, PositionSetError>
-Engine::perft(const std::string& fen, Depth depth, bool isChess960) {
+std::variant<u64, PositionSetError> Engine::perft(const std::string& fen, Depth depth) {
     verify_network();
 
-    return Benchmark::perft(fen, depth, isChess960);
+    return Benchmark::perft(fen, depth);
 }
 
 void Engine::go(Search::LimitsType& limits) {
@@ -196,7 +193,7 @@ std::optional<PositionSetError> Engine::set_position(const std::string&         
                                                      const std::vector<std::string>& moves) {
     // Drop the old state and create a new one
     states   = StateListPtr(new std::deque<StateInfo>(1));
-    auto err = pos.set(fen, options["UCI_Chess960"], &states->back());
+    auto err = pos.set(fen, &states->back());
     if (err.has_value())
         return err;
 
@@ -324,7 +321,7 @@ void Engine::save_network(const std::optional<std::filesystem::path>& file) {
 void Engine::trace_eval() const {
     StateListPtr trace_states(new std::deque<StateInfo>(1));
     Position     p;
-    p.set(pos.fen(), options["UCI_Chess960"], &trace_states->back());
+    p.set(pos.fen(), &trace_states->back());
 
     verify_network();
 
