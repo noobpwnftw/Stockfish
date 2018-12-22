@@ -257,7 +257,7 @@ int best_group(size_t idx) {
       return -1;
   }
 
-  while (ptr->Size > 0 && byteOffset + ptr->Size <= returnLength)
+  while (byteOffset < returnLength)
   {
       if (ptr->Relationship == RelationNumaNode)
           nodes++;
