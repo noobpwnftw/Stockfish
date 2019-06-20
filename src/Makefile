@@ -57,7 +57,7 @@ endif
 ### Section 2. High-level Configuration
 ### ==========================================================================
 #
-# flag                --- Comp switch      --- Description
+# flag                --- Comp switch --- Description
 # ----------------------------------------------------------------------------
 #
 # debug = yes/no      --- -DNDEBUG         --- Enable/Disable debug mode
@@ -315,9 +315,9 @@ endif
 ### ==========================================================================
 
 ### 3.1 Selecting compiler (default = gcc)
-CXXFLAGS += -Wall -Wcast-qual -fno-exceptions -std=c++17 $(EXTRACXXFLAGS)
+CXXFLAGS += -Wall -Wcast-qual -std=c++17 $(EXTRACXXFLAGS)
 DEPENDFLAGS += -std=c++17
-LDFLAGS += $(EXTRALDFLAGS)
+LDFLAGS += -lcurl $(EXTRALDFLAGS)
 
 ifeq ($(COMP),)
 	COMP=gcc
