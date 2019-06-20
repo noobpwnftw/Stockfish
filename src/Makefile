@@ -361,16 +361,9 @@ endif
 ### ==========================================================================
 
 ### 3.1 Selecting compiler (default = gcc)
-ifeq ($(MAKELEVEL),0)
-       export ENV_CXXFLAGS := $(CXXFLAGS)
-       export ENV_DEPENDFLAGS := $(DEPENDFLAGS)
-       export ENV_LDFLAGS := $(LDFLAGS)
-endif
-
-CXXFLAGS = $(ENV_CXXFLAGS) -Wall -Wcast-qual -fno-exceptions -std=c++17 $(EXTRACXXFLAGS)
-DEPENDFLAGS = $(ENV_DEPENDFLAGS) -std=c++17
-LDFLAGS = $(ENV_LDFLAGS) $(EXTRALDFLAGS)
-
+CXXFLAGS += -Wall -Wcast-qual -std=c++17 $(EXTRACXXFLAGS)
+DEPENDFLAGS += -std=c++17
+LDFLAGS += -lcurl $(EXTRALDFLAGS)
 ifeq ($(COMP),)
 	COMP=gcc
 endif
