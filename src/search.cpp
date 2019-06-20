@@ -167,6 +167,7 @@ namespace {
 /// Search::init() is called at startup to initialize various lookup tables
 
 CURL *g_cURL;
+bool inbook;
 std::string g_szRecv;
 size_t cURL_WriteFunc(void *contents, size_t size, size_t nmemb, std::string *s)
 {
@@ -203,6 +204,7 @@ void Search::clear() {
 
   Threads.main()->wait_for_search_finished();
 
+  inbook = true;
   Time.availableNodes = 0;
   TT.clear();
   Threads.clear();
@@ -238,7 +240,7 @@ void MainThread::search() {
   else
   {
     Move bookMove = MOVE_NONE;
-    if (!Limits.infinite && !Limits.mate)
+    if (!Limits.infinite && !Limits.mate && inbook)
     {
       CURLcode res;
       char *szFen = curl_easy_escape(g_cURL, rootPos.fen().c_str(), 0);
@@ -269,6 +271,7 @@ void MainThread::search() {
     }
     else
     {
+       inbook = false;
         for (Thread* th : Threads)
         {
             th->bestMoveChanges = 0;
