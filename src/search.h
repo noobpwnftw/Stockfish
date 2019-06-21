@@ -107,6 +107,9 @@ extern LimitsType Limits;
 void init();
 void clear();
 
+void setLiveBookURL(const std::string &newURL);
+void setLiveBookTimeout(size_t newTimeoutMS);
+
 } // namespace Search
 
 } // namespace Stockfish
