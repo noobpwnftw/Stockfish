@@ -857,7 +857,7 @@ namespace {
         MovePicker mp(pos, ttMove, probCutBeta - ss->staticEval, &captureHistory);
 
         while ((move = mp.next_move()) != MOVE_NONE)
-            if (move != excludedMove && pos.legal(move))
+            if (move != excludedMove && pos.legal(move) && !pos.handicapped(move))
             {
                 assert(pos.capture(move) || promotion_type(move) == QUEEN);
 
@@ -958,7 +958,7 @@ moves_loop: // When in check, search starts here
           continue;
 
       // Check for legality
-      if (!rootNode && !pos.legal(move))
+      if (!rootNode && (!pos.legal(move) || pos.handicapped(move)))
           continue;
 
       ss->moveCount = ++moveCount;
@@ -1513,7 +1513,7 @@ moves_loop: // When in check, search starts here
       assert(is_ok(move));
 
       // Check for legality
-      if (!pos.legal(move))
+      if (!pos.legal(move) || pos.handicapped(move))
           continue;
 
       givesCheck = pos.gives_check(move);

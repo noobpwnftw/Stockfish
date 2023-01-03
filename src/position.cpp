@@ -75,6 +75,10 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
   for (Bitboard b = pos.checkers(); b; )
       os << UCI::square(pop_lsb(b)) << " ";
 
+  os << "\nHandicaps: ";
+  for (Bitboard b = pos.state()->handicaps; b; )
+      os << UCI::square(pop_lsb(b)) << " ";
+
   if (    int(Tablebases::MaxCardinality) >= popcount(pos.pieces())
       && !pos.can_castle(ANY_CASTLING))
   {
@@ -327,6 +331,22 @@ void Position::set_check_info(StateInfo* si) const {
   si->checkSquares[KING]   = 0;
 }
 
+void Position::add_handicap(Square hfrom) {
+  st->handicaps |= hfrom;
+  set_handicap_info(st);
+}
+
+void Position::set_handicap_info(StateInfo* si) const {
+
+  for (Bitboard b = si->handicaps; b; )
+  {
+      Square s = pop_lsb(b);
+      Piece pc = piece_on(s);
+      if (pc == NO_PIECE) {
+          si->handicaps ^= s;
+      }
+  }
+}
 
 /// Position::set_state() computes the hash keys of the position, and other
 /// data that once computed is updated incrementally as moves are made.
@@ -340,6 +360,7 @@ void Position::set_state(StateInfo* si) const {
   si->nonPawnMaterial[WHITE] = si->nonPawnMaterial[BLACK] = VALUE_ZERO;
   si->checkersBB = attackers_to(square<KING>(sideToMove)) & pieces(~sideToMove);
 
+  set_handicap_info(si);
   set_check_info(si);
 
   for (Bitboard b = pieces(); b; )
@@ -488,6 +509,21 @@ Bitboard Position::attackers_to(Square s, Bitboard occupied) const {
         | (attacks_bb<KING>(s)             & pieces(KING));
 }
 
+
+bool Position::handicapped(const Move m) const {
+
+  assert(is_ok(m));
+
+  Square from = from_sq(m);
+  Square to = to_sq(m);
+
+  if (st->handicaps & from) {
+      if (piece_on(to) == NO_PIECE && !(attackers_to(from) & pieces(~color_of(piece_on(from)))))
+          return true;
+  }
+
+  return false;
+}
 
 /// Position::legal() tests whether a pseudo-legal move is legal
 
@@ -775,6 +811,9 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
 
       // Reset rule 50 counter
       st->rule50 = 0;
+
+      if (st->handicaps & capsq)
+          st->handicaps ^= capsq;
   }
 
   // Update hash key
@@ -866,6 +905,8 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
   st->checkersBB = givesCheck ? attackers_to(square<KING>(them)) & pieces(us) : 0;
 
   sideToMove = ~sideToMove;
+
+  set_handicap_info(st);
 
   // Update king attacks used for fast check detection
   set_check_info(st);

@@ -52,7 +52,7 @@ namespace {
   void position(Position& pos, istringstream& is, StateListPtr& states) {
 
     Move m;
-    string token, fen;
+    string token, fen, handicaps;
 
     is >> token;
 
@@ -69,6 +69,13 @@ namespace {
 
     states = StateListPtr(new std::deque<StateInfo>(1)); // Drop the old state and create a new one
     pos.set(fen, Options["UCI_Chess960"], &states->back(), Threads.main());
+
+    handicaps = string(Options["Handicaps"]);
+    if (!handicaps.empty() && handicaps != "<empty>") {
+        istringstream ss(handicaps);
+        while (ss >> token)
+            pos.add_handicap(make_square(File(token[0] - 'a'), Rank(token[1] - '1')));
+    }
 
     // Parse the move list, if any
     while (is >> token && (m = UCI::to_move(pos, token)) != MOVE_NONE)

@@ -40,13 +40,14 @@ namespace Stockfish {
 struct StateInfo {
 
   // Copied when making a move
-  Key    pawnKey;
-  Key    materialKey;
-  Value  nonPawnMaterial[COLOR_NB];
-  int    castlingRights;
-  int    rule50;
-  int    pliesFromNull;
-  Square epSquare;
+  Key        pawnKey;
+  Key        materialKey;
+  Value      nonPawnMaterial[COLOR_NB];
+  int        castlingRights;
+  int        rule50;
+  int        pliesFromNull;
+  Square     epSquare;
+  Bitboard   handicaps;
 
   // Not copied when making a move (will be recomputed anyhow)
   Key        key;
@@ -123,6 +124,7 @@ public:
   template<PieceType Pt> Bitboard attacks_by(Color c) const;
 
   // Properties of moves
+  bool handicapped(Move m) const;
   bool legal(Move m) const;
   bool pseudo_legal(const Move m) const;
   bool capture(Move m) const;
@@ -175,11 +177,14 @@ public:
   void put_piece(Piece pc, Square s);
   void remove_piece(Square s);
 
+  void add_handicap(Square hfrom);
+
 private:
   // Initialization helpers (used while setting up a position)
   void set_castling_right(Color c, Square rfrom);
   void set_state(StateInfo* si) const;
   void set_check_info(StateInfo* si) const;
+  void set_handicap_info(StateInfo* si) const;
 
   // Other helpers
   void move_piece(Square from, Square to);
