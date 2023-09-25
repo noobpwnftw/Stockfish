@@ -811,7 +811,7 @@ namespace {
         if (eval == VALUE_NONE)
             ss->staticEval = eval = evaluate(pos);
         else if (PvNode)
-               Eval::NNUE::hint_common_parent_position(pos);
+            Eval::NNUE::hint_common_parent_position(pos);
 
         // ttValue can be used as a better position evaluation (~7 Elo)
         if (    ttValue != VALUE_NONE
@@ -1415,8 +1415,8 @@ moves_loop: // When in check, search starts here
                   assert(depth > 0);
                   alpha = value; // Update alpha! Always alpha < beta
               }
-              }
           }
+      }
 
 
       // If the move is worse than some previously searched move, remember it to update its stats later
