@@ -210,7 +210,12 @@ void Search::Worker::start_searching() {
 
         if (bestThread->rootMoves[0].pv.size() > 1
             || bestThread->rootMoves[0].extract_ponder_from_tt(tt, rootPos))
+        {
+            StateInfo tmpSI;
+            rootPos.do_move(bestThread->rootMoves[0].pv[0], tmpSI);
             ponder = UCIEngine::move(bestThread->rootMoves[0].pv[1], rootPos.is_chess960());
+            rootPos.undo_move(bestThread->rootMoves[0].pv[0]);
+        }
 
         auto bestmove = UCIEngine::move(bestThread->rootMoves[0].pv[0], rootPos.is_chess960());
         main_manager()->updates.onBestmove(bestmove, ponder);
@@ -2073,8 +2078,15 @@ void SearchManager::pv(Search::Worker&           worker,
             syzygy_extend_pv(worker.options, worker.limits, pos, rootMoves[i], v);
 
         std::string pv;
-        for (Move m : rootMoves[i].pv)
+        std::list<StateInfo> sts;
+        for (Move m : rootMoves[i].pv) {
+            ASSERT_ALIGNED(&st, Eval::NNUE::CacheLineSize);
             pv += UCIEngine::move(m, pos.is_chess960()) + " ";
+            auto& st = sts.emplace_back();
+            pos.do_move(m, st);
+        }
+        for (auto it = rootMoves[i].pv.rbegin(); it != rootMoves[i].pv.rend(); ++it)
+            pos.undo_move(*it);
 
         // Remove last whitespace
         if (!pv.empty())

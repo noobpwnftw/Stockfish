@@ -56,10 +56,10 @@ uint64_t perft(Position& pos, Depth depth) {
     return nodes;
 }
 
-inline uint64_t perft(const std::string& fen, Depth depth, bool isChess960) {
+inline uint64_t perft(const std::string& fen, Depth depth) {
     StateListPtr states(new std::deque<StateInfo>(1));
     Position     p;
-    p.set(fen, isChess960, &states->back());
+    p.set(fen, &states->back());
 
     return perft<true>(p, depth);
 }

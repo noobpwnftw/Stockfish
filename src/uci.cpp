@@ -312,7 +312,7 @@ void UCIEngine::setoption(std::istringstream& is) {
 }
 
 std::uint64_t UCIEngine::perft(const Search::LimitsType& limits) {
-    auto nodes = engine.perft(engine.fen(), limits.perft, engine.get_options()["UCI_Chess960"]);
+    auto nodes = engine.perft(engine.fen(), limits.perft);
     sync_cout << "\nNodes searched: " << nodes << "\n" << sync_endl;
     return nodes;
 }

@@ -57,7 +57,7 @@ Engine::Engine(std::string path) :
       NN::Networks(
         NN::NetworkBig({EvalFileDefaultNameBig, "None", ""}, NN::EmbeddedNNUEType::BIG),
         NN::NetworkSmall({EvalFileDefaultNameSmall, "None", ""}, NN::EmbeddedNNUEType::SMALL))) {
-    pos.set(StartFEN, false, &states->back());
+    pos.set(StartFEN, &states->back());
     capSq = SQ_NONE;
 
     options["Debug Log File"] << Option("", [](const Option& o) {
@@ -89,7 +89,6 @@ Engine::Engine(std::string path) :
     options["Skill Level"] << Option(20, 0, 20);
     options["Move Overhead"] << Option(10, 0, 5000);
     options["nodestime"] << Option(0, 0, 10000);
-    options["UCI_Chess960"] << Option(false);
     options["UCI_LimitStrength"] << Option(false);
     options["UCI_Elo"] << Option(Stockfish::Search::Skill::LowestElo,
                                  Stockfish::Search::Skill::LowestElo,
@@ -115,10 +114,10 @@ Engine::Engine(std::string path) :
     resize_threads();
 }
 
-std::uint64_t Engine::perft(const std::string& fen, Depth depth, bool isChess960) {
+std::uint64_t Engine::perft(const std::string& fen, Depth depth) {
     verify_networks();
 
-    return Benchmark::perft(fen, depth, isChess960);
+    return Benchmark::perft(fen, depth);
 }
 
 void Engine::go(Search::LimitsType& limits) {
@@ -161,7 +160,7 @@ void Engine::wait_for_search_finished() { threads.main_thread()->wait_for_search
 void Engine::set_position(const std::string& fen, const std::vector<std::string>& moves) {
     // Drop the old state and create a new one
     states = StateListPtr(new std::deque<StateInfo>(1));
-    pos.set(fen, options["UCI_Chess960"], &states->back());
+    pos.set(fen, &states->back());
 
     capSq = SQ_NONE;
     for (const auto& move : moves)
@@ -265,7 +264,7 @@ void Engine::save_network(const std::pair<std::optional<std::string>, std::strin
 void Engine::trace_eval() const {
     StateListPtr trace_states(new std::deque<StateInfo>(1));
     Position     p;
-    p.set(pos.fen(), options["UCI_Chess960"], &trace_states->back());
+    p.set(pos.fen(), &trace_states->back());
 
     verify_networks();
 
