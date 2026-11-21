@@ -39,7 +39,7 @@
 #include "position.h"
 #include "search.h"
 #include "shm.h"
-#include "syzygy/tbprobe.h"
+#include "tbprobe.h"
 #include "types.h"
 #include "uci.h"
 #include "ucioption.h"
@@ -120,6 +120,27 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
 
     options.add("UCI_ShowWDL", Option(false));
 
+#ifdef USE_CHESSTB
+    options.add(  //
+      "ChessTBPath", Option("", [](const Option& o) {
+          Tablebases::init(o);
+          return std::nullopt;
+      }));
+
+    options.add("ChessTBProbeDepth", Option(1, 1, 100));
+
+    options.add("ChessTBMateProbeDepth", Option(20, 1, 100));
+
+    options.add("ChessTB50MoveRule", Option(true));
+
+    options.add("ChessTBProbeLimit", Option(8, 0, 8));
+
+    options.add("ChessTBCache", Option(64, 1, 1 << 20, [](const Option& o) {
+                    Tablebases::set_cache_size(size_t(int(o)));
+                    return std::nullopt;
+                }));
+    Tablebases::set_cache_size(size_t(int(options["ChessTBCache"])));
+#elif defined(USE_SYZYGY)
     options.add(  //
       "SyzygyPath", Option("", [](const Option& o) {
           Tablebases::init(o);
@@ -131,6 +152,7 @@ Engine::Engine(std::optional<std::filesystem::path> path) :
     options.add("Syzygy50MoveRule", Option(true));
 
     options.add("SyzygyProbeLimit", Option(7, 0, 7));
+#endif
 
     options.add(  //
       "EvalFile", Option(EvalFileDefaultName, [this](const Option& o) {
@@ -164,8 +186,11 @@ void Engine::search_clear() {
     tt.clear(threads);
     threads.clear();
 
+    // ChessTB keeps its tables: their mappings and caches are bounded.
+#if defined(USE_SYZYGY)
     // TODO: does not work with multiple instances
     Tablebases::init(options["SyzygyPath"]);  // Free mapped files
+#endif
 }
 
 void Engine::set_on_update_no_moves(std::function<void(const Engine::InfoShort&)>&& f) {

@@ -78,7 +78,7 @@ PGOBENCH = $(RUN_PREFIX) ./$(EXE) bench
 ### Source and object files
 SRCS = attacks.cpp benchmark.cpp bitboard.cpp evaluate.cpp main.cpp \
 	misc.cpp movegen.cpp movepick.cpp position.cpp \
-	search.cpp thread.cpp timeman.cpp tt.cpp uci.cpp ucioption.cpp tune.cpp syzygy/tbprobe.cpp \
+	search.cpp thread.cpp timeman.cpp tt.cpp uci.cpp ucioption.cpp tune.cpp \
 	nnue/nnue_accumulator.cpp nnue/nnue_misc.cpp nnue/network.cpp \
 	nnue/features/k32h3.cpp nnue/features/full_threats.cpp nnue/features/pp_3wide.cpp \
 	engine.cpp score.cpp memory.cpp
@@ -90,12 +90,12 @@ HEADERS = attacks.h benchmark.h bitboard.h evaluate.h misc.h movegen.h movepick.
 		nnue/features/pp_3wide.h nnue/layers/affine_transform.h nnue/layers/affine_transform_sparse_input.h \
 		nnue/layers/clipped_relu.h nnue/layers/sqr_clipped_relu.h nnue/nnue_accumulator.h \
 		nnue/nnue_architecture.h nnue/nnue_common.h nnue/nnue_feature_transformer.h nnue/simd.h \
-		nnue/nnz_helper.h position.h search.h syzygy/tbprobe.h thread.h thread_native.h timeman.h \
+		nnue/nnz_helper.h position.h search.h tbprobe.h thread.h thread_native.h timeman.h \
 		tt.h tune.h types.h uci.h ucioption.h perft.h nnue/network.h engine.h score.h numa.h memory.h shm.h shm_unix.h
 
 OBJS = $(notdir $(SRCS:.cpp=.o))
 
-VPATH = syzygy:nnue:nnue/features
+VPATH = syzygy:chesstb:nnue:nnue/features
 
 ### ==========================================================================
 ### Section 2. High-level Configuration
@@ -133,7 +133,8 @@ VPATH = syzygy:nnue:nnue/features
 # lsx = yes/no        --- -mlsx              --- Use Loongson SIMD eXtension
 # lasx = yes/no       --- -mlasx             --- Use Loongson Advanced SIMD eXtension
 # relaxedsimd = y/n   --- -mrelaxed-simd     --- Use WebAssembly relaxed SIMD extension
-# syzygy = yes/no     --- -DNO_TABLEBASES    --- Support Syzygy tablebase probing
+# syzygy = yes/no     --- -DUSE_SYZYGY       --- Support Syzygy tablebase probing
+# chesstb = yes/no    --- -DUSE_CHESSTB      --- Probe ChessTB tables instead of Syzygy
 #
 # Note that Makefile is space sensitive, so when adding new architectures
 # or modifying existing flags, you have to make sure there are no extra spaces
@@ -200,6 +201,7 @@ lsx = no
 lasx = no
 relaxedsimd = no
 syzygy = yes
+chesstb = no
 STRIP = strip
 
 ifneq ($(shell which clang-format-20 2> /dev/null),)
@@ -909,9 +911,22 @@ ifeq ($(pext),yes)
 	endif
 endif
 
+### ChessTB tablebases: chesstb/probe.cpp implements the same interface as
+### syzygy/tbprobe.cpp, in its place
+ifeq ($(chesstb),yes)
+	ifeq ($(origin syzygy)$(syzygy),command lineyes)
+        $(error syzygy=yes and chesstb=yes are mutually exclusive)
+	endif
+	override syzygy = no
+	CPPFLAGS += -DUSE_CHESSTB
+	SRCS += chesstb/probe.cpp chesstb/index.cpp chesstb/compress.cpp chesstb/filesystem.cpp \
+		chesstb/wdl_file.cpp chesstb/dtz_file.cpp chesstb/dtc_file.cpp chesstb/dtm_file.cpp chesstb/dtm50_file.cpp
+endif
+
 ### Syzygy tablebases
-ifeq ($(syzygy),no)
-	CXXFLAGS += -DNO_TABLEBASES
+ifeq ($(syzygy),yes)
+	CPPFLAGS += -DUSE_SYZYGY
+	SRCS += syzygy/tbprobe.cpp
 endif
 
 ### 3.8.1 Try to include git info for versioning and avoid recompiles if nothing changes
@@ -1286,6 +1301,7 @@ config-sanity: net
 	echo "lsx: '$(lsx)'" && \
 	echo "lasx: '$(lasx)'" && \
 	echo "syzygy: '$(syzygy)'" && \
+	echo "chesstb: '$(chesstb)'" && \
 	echo "target_windows: '$(target_windows)'" && \
 	echo "" && \
 	echo "Flags:" && \
@@ -1322,6 +1338,7 @@ config-sanity: net
 	(test "$(lsx)" = "yes" || test "$(lsx)" = "no") && \
 	(test "$(lasx)" = "yes" || test "$(lasx)" = "no") && \
 	(test "$(syzygy)" = "yes" || test "$(syzygy)" = "no") && \
+	(test "$(chesstb)" = "yes" || test "$(chesstb)" = "no") && \
 	(test "$(comp)" = "gcc" || test "$(comp)" = "icx" || test "$(comp)" = "mingw" || \
 	 test "$(comp)" = "clang" || test "$(comp)" = "armv7a-linux-androideabi16-clang" || \
 	 test "$(comp)" = "aarch64-linux-android21-clang")

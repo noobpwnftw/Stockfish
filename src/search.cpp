@@ -28,7 +28,6 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <iostream>
-#include <list>
 #include <ratio>
 #include <string>
 #include <utility>
@@ -42,7 +41,7 @@
 #include "nnue/network.h"
 #include "nnue/nnue_accumulator.h"
 #include "position.h"
-#include "syzygy/tbprobe.h"
+#include "tbprobe.h"
 #include "thread.h"
 #include "timeman.h"
 #include "tt.h"
@@ -58,13 +57,6 @@ inline int lmr_divisor(int depth) {
 }
 
 namespace TB = Tablebases;
-
-void syzygy_extend_pv(const OptionsMap&            options,
-                      const Search::LimitsType&    limits,
-                      Stockfish::Position&         pos,
-                      Stockfish::Search::RootMove& rootMove,
-                      Value&                       v,
-                      const usize                  multiPV);
 
 using namespace Search;
 
@@ -266,7 +258,7 @@ void Search::Worker::start_searching() {
     if (!uciPvSent || bestThread != this)
         main_manager()->output_pv(*bestThread, threads, tt, bestThread->rootDepth);
 
-    // In rare cases, output_pv() may change the ponder move through syzygy_extend_pv()
+    // In rare cases, output_pv() may change the ponder move through Tablebases::extend_pv()
     std::string ponder;
     if (bestThread->rootMoves[0].pv.size() > 1)
         ponder = UCIEngine::move(bestThread->rootMoves[0].pv[1], rootPos.is_chess960());
@@ -566,9 +558,13 @@ bool Search::Worker::iterative_deepening() {
                 rootMoves[0].inexactLower = true;
         }
 
-        // Have we found a "mate in x" after a completed iteration?
-        if (limits.mate && !threads.stop && is_mate_or_mated(rootMoves[0].score)
-            && VALUE_MATE - std::abs(rootMoves[0].score) <= 2 * limits.mate)
+        // Have we found a "mate in x" after a completed iteration? A root
+        // table mate is as good a proof.
+        Value mateScore = tbConfig.rootInTB && is_mate_or_mated(rootMoves[0].tbScore)
+                          ? rootMoves[0].tbScore
+                          : rootMoves[0].score;
+        if (limits.mate && !threads.stop && is_mate_or_mated(mateScore)
+            && VALUE_MATE - std::abs(mateScore) <= 2 * limits.mate)
             threads.stop = true;
 
         if (!mainThread)
@@ -945,14 +941,20 @@ Value Search::Worker::search(
         }
     }
 
+#if defined(USE_SYZYGY) || defined(USE_CHESSTB)
     // Step 7. Tablebases probe
     if (!rootNode && !excludedMove && tbConfig.cardinality)
     {
         int piecesCount = pos.count<ALL_PIECES>();
 
+    #ifdef USE_CHESSTB
+        const bool castlingProbed = true;  // ChessTB has castling tables
+    #else
+        const bool castlingProbed = !pos.can_castle(ANY_CASTLING);
+    #endif
         if (piecesCount <= tbConfig.cardinality
             && (piecesCount < tbConfig.cardinality || depth >= tbConfig.probeDepth)
-            && pos.rule50_count() == 0 && !pos.can_castle(ANY_CASTLING))
+            && pos.rule50_count() == 0 && castlingProbed)
         {
             TB::ProbeState err;
             TB::WDLScore   wdl = TB::probe_wdl(pos, &err);
@@ -978,6 +980,31 @@ Value Search::Worker::search(
                         : wdl > drawScore  ? BOUND_LOWER
                                            : BOUND_EXACT;
 
+    #ifdef USE_CHESSTB
+                // Where the class can't decide the node (the window wants the
+                // mate), read the distance, from ChessTBMateProbeDepth where the
+                // subtree outweighs a block decode. The TT keeps it, but for a
+                // mate past 100 plies (value_from_tt): that one is read again.
+                if (b != BOUND_EXACT && (b == BOUND_LOWER ? value < beta : value > alpha))
+                {
+                    if (ttHit && ttData.bound == BOUND_EXACT && is_valid(ttData.value)
+                        && is_mate_or_mated(ttData.value))
+                        value = ttData.value, b = BOUND_EXACT;
+                    else if (depth >= tbConfig.mateProbeDepth)
+                    {
+                        int dtm, dtm50;
+                        Tablebases::probe_dtm(pos, tbConfig.useRule50, dtm, dtm50);
+                        const int plies = tbConfig.useRule50 ? dtm50 : dtm;
+                        if (plies && ss->ply + std::abs(plies) < MAX_PLY)
+                        {
+                            value =
+                              plies > 0 ? mate_in(ss->ply + plies) : mated_in(ss->ply - plies);
+                            b = BOUND_EXACT;
+                        }
+                    }
+                }
+    #endif
+
                 if (b == BOUND_EXACT || (b == BOUND_LOWER ? value >= beta : value <= alpha))
                 {
                     ttWriter.write(posKey, value_to_tt(value, ss->ply), ss->ttPv, b,
@@ -997,6 +1024,7 @@ Value Search::Worker::search(
             }
         }
     }
+#endif
 
     if (ss->inCheck)
         goto moves_loop;
@@ -2155,147 +2183,6 @@ void SearchManager::check_time(Search::Worker& worker) {
         worker.threads.stop = true;
 }
 
-// Used to correct and extend PVs for moves that have a TB (but not a mate) score.
-// Keeps the search based PV for as long as it is verified to maintain the game
-// outcome, truncates afterwards. Finally, extends to mate the PV, providing a
-// possible continuation (but not a proven mating line).
-void syzygy_extend_pv(const OptionsMap&         options,
-                      const Search::LimitsType& limits,
-                      Position&                 pos,
-                      RootMove&                 rootMove,
-                      Value&                    v,
-                      const usize               multiPV) {
-
-    auto t_start      = std::chrono::steady_clock::now();
-    int  moveOverhead = int(options["Move Overhead"]);
-    bool rule50       = bool(options["Syzygy50MoveRule"]);
-
-    // Do not use more than moveOverhead / 2 ms, if time management is active.
-    // Under 'nodestime' the pos.do_move() calls come for free.
-    auto time_abort = [&t_start, &moveOverhead, &limits, &multiPV]() -> bool {
-        auto t_end = std::chrono::steady_clock::now();
-        return !limits.npmsec && limits.use_time_management()
-            && 2 * multiPV * std::chrono::duration<double, std::milli>(t_end - t_start).count()
-                 >= moveOverhead;
-    };
-
-    if (time_abort())
-        return;
-
-    std::list<StateInfo> sts;
-
-    // Step 0, do the rootMove, no correction allowed, as needed for MultiPV in TB
-    auto& stRoot = sts.emplace_back();
-    pos.do_move(rootMove.pv[0], stRoot);
-    int ply = 1;
-
-    // Step 1, walk the PV to the last position in TB with correct decisive score
-    while (usize(ply) < rootMove.pv.size())
-    {
-        Move& pvMove = rootMove.pv[ply];
-
-        RootMoves legalMoves;
-        for (const auto& m : MoveList<ALL>(pos))
-            legalMoves.emplace_back(m);
-
-        TB::Config config = TB::rank_root_moves(options, pos, legalMoves, false, time_abort);
-        RootMove&  rm     = *std::find(legalMoves.begin(), legalMoves.end(), pvMove);
-
-        if (legalMoves[0].tbRank != rm.tbRank)
-            break;
-
-        ply++;
-
-        auto& st = sts.emplace_back();
-        pos.do_move(pvMove, st);
-
-        // Do not allow for repetitions or drawing moves along the PV in TB regime
-        if (config.rootInTB && ((rule50 && pos.is_draw(ply)) || pos.is_repetition(ply)))
-        {
-            pos.undo_move(pvMove);
-            ply--;
-            break;
-        }
-
-        // Full PV shown will thus be validated and end in TB. If we cannot
-        // validate the full PV in time, we do not show it.
-        if (config.rootInTB && time_abort())
-            break;
-    }
-
-    // Resize the PV to the correct part
-    rootMove.pv.resize(ply);
-
-    // Step 2, now extend the PV to mate, as if the user explored syzygy-tables.info
-    // using top ranked moves (minimal DTZ), which gives optimal mates only for simple
-    // endgames e.g. KRvK.
-    while (!(rule50 && pos.is_draw(0)))
-    {
-        if (time_abort())
-            break;
-
-        RootMoves legalMoves;
-        for (const auto& m : MoveList<ALL>(pos))
-        {
-            auto&     rm = legalMoves.emplace_back(m);
-            StateInfo tmpSI;
-            pos.do_move(m, tmpSI);
-            // Give a score of each move to break DTZ ties restricting opponent
-            // mobility, but not giving the opponent a capture.
-            for (const auto& mOpp : MoveList<ALL>(pos))
-                rm.tbRank -= pos.capture(mOpp) ? 100 : 1;
-            pos.undo_move(m);
-        }
-
-        // Mate found
-        if (legalMoves.empty())
-            break;
-
-        // Sort moves according to their above assigned rank.
-        // This will break ties for moves with equal DTZ in rank_root_moves.
-        std::stable_sort(
-          legalMoves.begin(), legalMoves.end(),
-          [](const Search::RootMove& a, const Search::RootMove& b) { return a.tbRank > b.tbRank; });
-
-        // The winning side tries to minimize DTZ, the losing side maximizes it
-        TB::Config config = TB::rank_root_moves(options, pos, legalMoves, true, time_abort);
-
-        // If DTZ is not available we might not find a mate, so we bail out
-        if (!config.rootInTB || config.cardinality > 0)
-            break;
-
-        ply++;
-
-        Move& pvMove = legalMoves[0].pv[0];
-        rootMove.pv.push_back(pvMove);
-        auto& st = sts.emplace_back();
-        pos.do_move(pvMove, st);
-    }
-
-    // Finding a draw in this function is an exceptional case, that cannot happen when rule50 is false or
-    // during engine game play, since we have a winning score, and play correctly
-    // with TB support. However, it can be that a position is draw due to the 50 move
-    // rule if it has been reached on the board with a non-optimal 50 move counter
-    // (e.g. 8/8/6k1/3B4/3K4/4N3/8/8 w - - 54 106 ) which TB with dtz counter rounding
-    // cannot always correctly rank. See also
-    // https://github.com/official-stockfish/Stockfish/issues/5175#issuecomment-2058893495
-    // We adjust the score to match the found PV. Note that a TB loss score can be
-    // displayed if the engine did not find a drawing move yet, but eventually search
-    // will figure it out (e.g. 1kq5/q2r4/5K2/8/8/8/8/7Q w - - 96 1 )
-    if (pos.is_draw(0))
-        v = VALUE_DRAW;
-
-    // Undo the PV moves
-    for (usize i = rootMove.pv.size(); i > 0; --i)
-        pos.undo_move(rootMove.pv[i - 1]);
-
-    // Inform if we couldn't get a full extension in time
-    if (time_abort())
-        sync_cout
-          << "info string Syzygy based PV extension requires more time, increase Move Overhead as needed."
-          << sync_endl;
-}
-
 void SearchManager::output_pv(Search::Worker&           worker,
                               const ThreadPool&         threads,
                               const TranspositionTable& tt,
@@ -2320,14 +2207,30 @@ void SearchManager::output_pv(Search::Worker&           worker,
         if (v == -VALUE_INFINITE)
             v = VALUE_ZERO;
 
+#ifdef USE_CHESSTB
+        // A root table mate stands over search's; below the root, extend_pv
+        // makes a TB score exact and continues search's mates.
+        const bool rootMate  = worker.tbConfig.rootInTB && is_mate_or_mated(rootMoves[i].tbScore);
+        bool       isTBScore = worker.tbConfig.rootInTB && (!is_mate_or_mated(v) || rootMate);
+        const bool tableMate = rootMate || (!worker.tbConfig.rootInTB && is_mate_or_mated(v));
+#else
         bool isTBScore = worker.tbConfig.rootInTB && !is_mate_or_mated(v);
-        v              = isTBScore ? rootMoves[i].tbScore : v;
+#endif
+        v = isTBScore ? rootMoves[i].tbScore : v;
 
+#if defined(USE_SYZYGY) || defined(USE_CHESSTB)
         // Potentially correct and extend the PV, and in exceptional cases v.
         // Previous PVs have already been extended. Inexact flags indicate an unreliable PV.
-        if (is_decisive(v) && !is_mate_or_mated(v) && !usePreviousScore
+        // ChessTB also continues a table mate to mate.
+    #ifdef USE_CHESSTB
+        const bool extend = !is_mate_or_mated(v) || tableMate;
+    #else
+        const bool extend = !is_mate_or_mated(v);
+    #endif
+        if (is_decisive(v) && extend && !usePreviousScore
             && (!rootMoves[i].is_inexact() || isTBScore))
-            syzygy_extend_pv(worker.options, worker.limits, pos, rootMoves[i], v, multiPV);
+            Tablebases::extend_pv(worker.options, worker.limits, pos, rootMoves[i], v, multiPV);
+#endif
 
         std::string pv;
         for (Move m : usePreviousScore ? rootMoves[i].previousPV : rootMoves[i].pv)

@@ -36,7 +36,7 @@
 #include "memory.h"
 #include "movegen.h"
 #include "search.h"
-#include "syzygy/tbprobe.h"
+#include "tbprobe.h"
 #include "timeman.h"
 #include "types.h"
 #include "uci.h"
@@ -289,10 +289,10 @@ usize ThreadPool::num_threads() const { return threads.size(); }
 
 // Wakes up main thread waiting in idle_loop() and returns immediately.
 // Main thread will wake up other threads and start the search.
-void ThreadPool::start_thinking(const OptionsMap&  options,
-                                Position&          pos,
-                                StateListPtr&      states,
-                                Search::LimitsType limits) {
+void ThreadPool::start_thinking([[maybe_unused]] const OptionsMap& options,
+                                Position&                          pos,
+                                StateListPtr&                      states,
+                                Search::LimitsType                 limits) {
 
     main_thread()->wait_for_search_finished();
 
@@ -315,7 +315,11 @@ void ThreadPool::start_thinking(const OptionsMap&  options,
         for (const auto& m : MoveList<ALL>(pos))
             rootMoves.emplace_back(m);
 
+#if defined(USE_SYZYGY) || defined(USE_CHESSTB)
     Tablebases::Config tbConfig = Tablebases::rank_root_moves(options, pos, rootMoves);
+#else
+    Tablebases::Config tbConfig;
+#endif
 
     // After ownership transfer 'states' becomes empty, so if we stop the search
     // and call 'go' again without setting a new position states.get() == nullptr.

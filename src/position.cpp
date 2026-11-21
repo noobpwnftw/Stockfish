@@ -34,7 +34,7 @@
 #include "history.h"
 #include "misc.h"
 #include "movegen.h"
-#include "syzygy/tbprobe.h"
+#include "tbprobe.h"
 #include "uci.h"
 
 using std::string;
@@ -168,18 +168,37 @@ std::ostream& operator<<(std::ostream& os, const Position& pos) {
     for (Bitboard b = pos.checkers(); b;)
         os << UCIEngine::square(pop_lsb(b)) << " ";
 
+#if defined(USE_SYZYGY) || defined(USE_CHESSTB)
+    #ifdef USE_CHESSTB
+    if (Tablebases::MaxCardinality >= popcount(pos.pieces()))
+    #else
     if (Tablebases::MaxCardinality >= popcount(pos.pieces()) && !pos.can_castle(ANY_CASTLING))
+    #endif
     {
         StateInfo st;
 
         Position p;
         p.set(pos.fen(), pos.is_chess960(), &st);
+    #ifdef USE_CHESSTB
+        Tablebases::ProbeState s;
+        Tablebases::WDLScore   wdl = Tablebases::probe_wdl(p, &s);
+        int                    dtz, dtc, order, dtm, dtm50;
+        Tablebases::probe_dtc(p, dtz, dtc, order);
+        Tablebases::probe_dtm(p, true, dtm, dtm50);
+        os << "\nTablebases WDL: " << std::setw(4) << wdl << " (" << s << ")";
+        os << "\nTablebases DTZ: " << std::setw(4) << dtz;
+        os << "\nTablebases DTC: " << std::setw(4) << dtc << ", order " << order;
+        os << "\nTablebases DTM: " << std::setw(4) << dtm;
+        os << "\nTablebases DTM50: " << std::setw(4) << dtm50;
+    #else
         Tablebases::ProbeState s1, s2;
         Tablebases::WDLScore   wdl = Tablebases::probe_wdl(p, &s1);
         int                    dtz = Tablebases::probe_dtz(p, &s2);
         os << "\nTablebases WDL: " << std::setw(4) << wdl << " (" << s1 << ")"
            << "\nTablebases DTZ: " << std::setw(4) << dtz << " (" << s2 << ")";
+    #endif
     }
+#endif
 
     return os;
 }
